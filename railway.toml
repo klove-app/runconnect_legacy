@@ -1,0 +1,8 @@
+[build]
+builder = "nixpacks"
+buildCommand = "pip install -r requirements.txt"
+
+[deploy]
+startCommand = "python migrate.py && cd runconnect_legacy && python main.py"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3 
