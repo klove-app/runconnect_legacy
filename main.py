@@ -7,6 +7,10 @@ from PIL import Image, ImageDraw, ImageFont
 import requests
 from io import BytesIO
 import base64
+from dotenv import load_dotenv
+
+# Загружаем переменные окружения
+load_dotenv()
 
 # Добавляем текущую директорию в PATH
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -16,7 +20,11 @@ sys.path.append(current_dir)
 from bot_instance import bot
 from database.base import Base, engine
 from database.logger import logger
-import config.config as cfg
+
+# Настройки Stability AI
+STABILITY_API_HOST = 'https://api.stability.ai'
+STABILITY_API_KEY = os.getenv('STABILITY_API_KEY')
+STABLE_DIFFUSION_ENGINE_ID = 'stable-diffusion-xl-1024-v1-0'
 
 # Импортируем обработчики
 from handlers.chat_handlers import register_chat_handlers
@@ -136,13 +144,13 @@ def generate_achievement_image(distance, username, date):
         logger.info(f"Generated prompt: {prompt}")
         
         # Формируем запрос к API
-        url = f"{cfg.STABILITY_API_HOST}/v1/generation/{cfg.STABLE_DIFFUSION_ENGINE_ID}/text-to-image"
+        url = f"{STABILITY_API_HOST}/v1/generation/{STABLE_DIFFUSION_ENGINE_ID}/text-to-image"
         logger.info(f"API URL: {url}")
         
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "Authorization": f"Bearer {cfg.STABILITY_API_KEY}"
+            "Authorization": f"Bearer {STABILITY_API_KEY}"
         }
         logger.info("Headers prepared")
         
