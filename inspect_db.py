@@ -35,5 +35,5 @@ def inspect_database(db_path):
     conn.close()
 
 if __name__ == "__main__":
-    db_path = "running_bot.db"  # Используем относительный путь
+    db_path = "/Users/ivankazakov/PycharmProjects/Runconnect_legacy/runconnect_legacy/running_bot.db"
     inspect_database(db_path) 
