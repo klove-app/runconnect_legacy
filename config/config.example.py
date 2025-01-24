@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Database
-DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://user:password@host:port/dbname')
+DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://user:password@localhost:5432/dbname')
 
 # Bot
 BOT_TOKEN = os.getenv('BOT_TOKEN', 'your_bot_token_here')
