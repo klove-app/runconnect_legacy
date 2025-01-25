@@ -187,121 +187,57 @@ class StatsHandler(BaseHandler):
             self.logger.error(f"Full traceback: {traceback.format_exc()}")
             self.bot.reply_to(message, "❌ Произошла ошибка при получении топа бегунов")
 
-    def handle_profile(self, message: Message, user_id=None, db=None):
-        """Показывает личный кабинет пользователя"""
-        self.log_message(message, "profile")
+    def handle_profile(self, message: Message):
+        """Показывает профиль пользователя"""
+        logger.info("Handler profile received message: text='%s', from_user=%s, chat=%s", 
+                    message.text, message.from_user.id, message.chat.id)
         try:
-            # Если user_id не передан, берем из сообщения
-            if user_id is None:
-                user_id = str(message.from_user.id)
+            user_id = str(message.from_user.id)
+            logger.info("Getting profile for user %s", user_id)
             
-            self.logger.info(f"Getting profile for user {user_id}")
+            # Получаем информацию о пользователе
+            user = User.get_by_id(user_id)
+            if not user:
+                logger.warning("User %s not found", user_id)
+                self.bot.reply_to(message, "❌ Вы еще не зарегистрированы. Отправьте боту свою первую пробежку!")
+                return
+
+            # Получаем статистику за текущий год
+            current_year = datetime.now().year
+            logger.info("Getting year stats for user %s", user_id)
+            year_stats = RunningLog.get_user_stats(user_id, current_year)
             
-            # Используем переданную сессию или создаем новую
-            if db is None:
-                self.logger.debug("Creating new database session")
-                db = Session()
+            # Формируем ответ
+            response = f"👤 Профиль {user.username}\n\n"
+            
+            if user.goal_km > 0:
+                progress = (year_stats['total_km'] / user.goal_km * 100)
+                response += f"🎯 Цель на год: {user.goal_km:.2f} км\n"
+                response += f"✨ Прогресс: {progress:.2f}%\n\n"
             else:
-                self.logger.debug("Using existing database session")
+                response += "🎯 Цель на год не установлена\n\n"
             
-            try:
-                # Получаем или создаем пользователя
-                user = db.query(User).filter(User.user_id == user_id).first()
-                self.logger.debug(f"Found user in database: {user is not None}")
-                
-                if not user:
-                    username = message.from_user.username or message.from_user.first_name
-                    chat_type = message.chat.type if message.chat else 'private'
-                    self.logger.info(f"Creating new user: {username}, chat_type: {chat_type}")
-                    user = User(user_id=user_id, username=username, chat_type=chat_type)
-                    db.add(user)
-                    db.commit()
-                
-                current_year = datetime.now().year
-                current_month = datetime.now().month
-                
-                # Получаем статистику
-                self.logger.debug(f"Getting year stats for user {user_id}")
-                year_stats = RunningLog.get_user_stats(user_id, current_year, db=db)
-                self.logger.debug(f"Year stats: {year_stats}")
-                
-                self.logger.debug(f"Getting month stats for user {user_id}")
-                month_stats = RunningLog.get_user_stats(user_id, current_year, current_month, db=db)
-                self.logger.debug(f"Month stats: {month_stats}")
-                
-                self.logger.debug(f"Getting best stats for user {user_id}")
-                best_stats = RunningLog.get_best_stats(user_id, db=db)
-                self.logger.debug(f"Best stats: {best_stats}")
-                
-                # Формируем профиль с HTML-форматированием
-                response = f"<b>👤 Профиль {user.username}</b>\n\n"
-                
-                # Прогресс к цели
-                if user.goal_km > 0:
-                    progress = (year_stats['total_km'] / user.goal_km * 100)
-                    progress_bar = self._generate_progress_bar(progress)
-                    response += f"🎯 Цель на {current_year}: {user.goal_km:.2f} км\n"
-                    response += f"{progress_bar} {progress:.2f}%\n"
-                    response += f"📊 Пройдено: {year_stats['total_km']:.2f} км\n"
-                    response += f"⭐️ Осталось: {user.goal_km - year_stats['total_km']:.2f} км\n\n"
-                else:
-                    response += "🎯 Цель на год не установлена\n\n"
-                
-                # Статистика за текущий месяц
-                month_name = calendar.month_name[current_month]
-                response += f"📅 <b>{month_name}</b>\n"
-                response += f"├ Пробежек: {month_stats['runs_count']}\n"
-                response += f"├ Дистанция: {month_stats['total_km']:.2f} км\n"
-                if month_stats['runs_count'] > 0:
-                    response += f"└ Средняя: {month_stats['avg_km']:.2f} км\n\n"
-                else:
-                    response += f"└ Средняя: 0.0 км\n\n"
-                
-                # Статистика по типам чатов
-                if year_stats.get('chat_stats'):
-                    response += f"📊 <b>Статистика по чатам</b>\n"
-                    for chat_type, stats in year_stats['chat_stats'].items():
-                        chat_type_display = chat_type.capitalize() if chat_type else "Неизвестно"
-                        response += f"<b>{chat_type_display}</b>\n"
-                        response += f"├ Пробежек: {stats['runs_count']}\n"
-                        response += f"├ Дистанция: {stats['total_km']:.2f} км\n"
-                        response += f"└ Средняя: {stats['avg_km']:.2f} км\n\n"
-                
-                # Лучшие результаты
-                response += f"🏆 <b>Лучшие результаты</b>\n"
-                response += f"├ Пробежка: {best_stats['best_run']:.2f} км\n"
-                response += f"└ Всего: {best_stats['total_runs']} пробежек\n"
-                
-                self.logger.debug(f"Generated response: {response}")
-                
-                # Создаем клавиатуру
-                markup = InlineKeyboardMarkup()
-                
-                # Основные действия
-                markup.row(
-                    InlineKeyboardButton("📝 Подробная статистика", callback_data="show_detailed_stats"),
-                    InlineKeyboardButton("✏️ Редактировать пробежки", callback_data="edit_runs")
-                )
-                
-                # Кнопка установки цели
-                if user.goal_km == 0:
-                    markup.row(InlineKeyboardButton("🎯 Установить цель", callback_data="set_goal_0"))
-                else:
-                    markup.row(InlineKeyboardButton("🎯 Изменить цель", callback_data="set_goal_0"))
-                
-                # Отправляем сообщение с клавиатурой
-                self.logger.info("Sending profile message")
-                self.bot.reply_to(message, response, reply_markup=markup, parse_mode='HTML')
-                self.logger.info("Profile message sent successfully")
-                
-            finally:
-                if db is not None:
-                    self.logger.debug("Closing database session")
-                    db.close()
-                    
+            # Добавляем статистику за текущий месяц
+            response += f"📊 {calendar.month_name[datetime.now().month]}:\n"
+            response += f"├ Пробежек: {year_stats['runs_count']}\n"
+            response += f"├ Дистанция: {year_stats['total_km']:.2f} км\n"
+            response += f"└ Средняя: {year_stats['avg_km']:.2f} км\n"
+            
+            # Создаем клавиатуру
+            markup = InlineKeyboardMarkup()
+            markup.row(
+                InlineKeyboardButton("📊 Подроб...статистика", callback_data="show_detailed_stats"),
+                InlineKeyboardButton("✏️ Редакт...пробежки", callback_data="edit_runs")
+            )
+            if not user.goal_km:
+                markup.row(InlineKeyboardButton("🎯 Установить цель", callback_data="set_goal_precise"))
+            
+            logger.info("Sending profile response")
+            self.bot.reply_to(message, response, reply_markup=markup)
+            
         except Exception as e:
-            self.logger.error(f"Error in handle_profile: {e}")
-            self.logger.error(f"Full traceback: {traceback.format_exc()}")
+            logger.error("Error in handle_profile: %s", str(e))
+            logger.error("Full traceback: %s", traceback.format_exc())
             self.bot.reply_to(message, "❌ Произошла ошибка при получении профиля")
 
     def _generate_progress_bar(self, percentage: float, length: int = 10) -> str:
@@ -372,7 +308,7 @@ class StatsHandler(BaseHandler):
             # Лучшие показатели
             article += f"\n<b>Лучшие показатели за все время</b>\n"
             article += f"💪 Лучшая пробежка: {best_stats['best_run']:.2f} км\n"
-            article += f"🌟 Общая дистанция: {best_stats['total_km']:.2f} км\n"
+            article += f"�� Общая дистанция: {best_stats['total_km']:.2f} км\n"
             article += f"📊 Всего пробежек: {best_stats['total_runs']}\n"
             
             return article
@@ -437,7 +373,7 @@ class StatsHandler(BaseHandler):
                     # Кнопка для точной настройки
                     markup.row(
                         InlineKeyboardButton(
-                            "🎯 Точная настройка",
+                            "�� Точная настройка",
                             callback_data="set_goal_precise"
                         )
                     )

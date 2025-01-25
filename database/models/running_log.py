@@ -84,37 +84,39 @@ class RunningLog(Base):
                 return 0.0
 
     @classmethod
-    def get_user_stats(cls, user_id: str, year: int, month: int = None) -> dict:
-        """Получить статистику пользователя"""
-        with Session() as session:
-            try:
-                query = session.query(
-                    func.count().label('runs_count'),
-                    func.sum(cls.km).label('total_km'),
-                    func.avg(cls.km).label('avg_km')
-                ).filter(
+    def get_user_stats(cls, user_id: str, current_year: int) -> dict:
+        """Получает статистику пользователя за указанный год"""
+        logger.info(f"Getting stats for user {user_id} for year {current_year}")
+        try:
+            with Session() as session:
+                # Получаем все пробежки пользователя за текущий год
+                runs = session.query(cls).filter(
                     cls.user_id == user_id,
-                    extract('year', cls.date_added) == year
-                )
+                    extract('year', cls.date_added) == current_year
+                ).all()
                 
-                if month:
-                    query = query.filter(extract('month', cls.date_added) == month)
+                # Если пробежек нет, возвращаем нулевые значения
+                if not runs:
+                    return {
+                        'runs_count': 0,
+                        'total_km': 0.0,
+                        'avg_km': 0.0
+                    }
                 
-                result = query.first()
+                # Считаем статистику
+                total_km = sum(run.km for run in runs)
+                runs_count = len(runs)
+                avg_km = total_km / runs_count if runs_count > 0 else 0
                 
                 return {
-                    'runs_count': result.runs_count or 0,
-                    'total_km': float(result.total_km or 0),
-                    'avg_km': float(result.avg_km or 0)
+                    'runs_count': runs_count,
+                    'total_km': total_km,
+                    'avg_km': avg_km
                 }
-            except Exception as e:
-                logger.error(f"Error getting user stats: {e}")
-                logger.error(f"Full traceback: {traceback.format_exc()}")
-                return {
-                    'runs_count': 0,
-                    'total_km': 0.0,
-                    'avg_km': 0.0
-                }
+        except Exception as e:
+            logger.error(f"Error getting user stats: {e}")
+            logger.error(traceback.format_exc())
+            raise
 
     @classmethod
     def get_top_runners(cls, limit: int = 10, year: int = None) -> list:
