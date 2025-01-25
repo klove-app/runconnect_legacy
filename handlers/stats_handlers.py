@@ -7,8 +7,12 @@ from handlers.base_handler import BaseHandler
 import calendar
 from database.session import Session
 from telebot.apihelper import ApiTelegramException
+from telebot import TeleBot
 
 class StatsHandler(BaseHandler):
+    def __init__(self, bot: TeleBot):
+        super().__init__(bot)
+
     def register(self):
         """Регистрирует обработчики статистики"""
         self.logger.info("Registering stats handlers")
@@ -1045,7 +1049,8 @@ class StatsHandler(BaseHandler):
                 "❌ Произошла ошибка при добавлении пробежки"
             )
 
-def register_handlers(bot):
-    """Регистрирует обработчики статистики"""
-    handler = StatsHandler(bot)
-    handler.register() 
+def register_handlers(bot: TeleBot):
+    logger.info("Registering stats handlers...")
+    stats_handler = StatsHandler(bot)
+    stats_handler.register()
+    logger.info("Stats handlers registered successfully") 
