@@ -5,7 +5,7 @@ from database.models.challenge import Challenge
 from database.models.user import User
 from database.models.running_log import RunningLog
 from utils.formatters import round_km
-from database.base import get_db
+from database.session import get_db
 from database.logger import logger
 from sqlalchemy import func, extract
 
