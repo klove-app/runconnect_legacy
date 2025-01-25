@@ -1,4 +1,5 @@
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.sql import text
 from database.logger import logger
 from database.session import engine
 
@@ -7,12 +8,26 @@ Base = declarative_base()
 logger.info("Base model class created")
 
 def init_db():
-    """Инициализация базы данных"""
-    logger.info("Initializing database")
-    try:
-        # Проверяем соединение с базой данных
-        with engine.connect() as connection:
-            logger.info("Successfully connected to the database")
-    except Exception as e:
-        logger.error(f"Error connecting to database: {e}")
-        raise 
+    """Инициализирует базу данных"""
+    logger.info("Creating database tables...")
+    
+    # Создаем последовательность для running_log_id, если она не существует
+    with engine.connect() as connection:
+        try:
+            connection.execute(text("""
+                DO $$ 
+                BEGIN
+                    CREATE SEQUENCE IF NOT EXISTS running_log_log_id_seq;
+                    -- Получаем максимальное значение log_id
+                    PERFORM setval('running_log_log_id_seq', COALESCE((SELECT MAX(log_id) FROM running_log), 0));
+                END $$;
+            """))
+            connection.commit()
+            logger.info("Sequence running_log_log_id_seq initialized")
+        except Exception as e:
+            logger.error(f"Error initializing sequence: {e}")
+            raise
+    
+    # Создаем таблицы
+    Base.metadata.create_all(bind=engine)
+    logger.info("Database tables created successfully") 
