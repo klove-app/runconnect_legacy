@@ -15,32 +15,29 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables created successfully")
     
-    # Пересоздаем последовательность для running_log_id
+    # Исправляем тип колонки log_id
     with engine.connect() as connection:
         try:
-            # Удаляем старую последовательность, если она существует
+            # Изменяем тип колонки на SERIAL
             connection.execute(text("""
                 DO $$ 
                 BEGIN
-                    -- Удаляем привязку последовательности к колонке
+                    -- Получаем максимальное значение
+                    DECLARE max_id INTEGER;
+                    SELECT COALESCE(MAX(log_id), 0) INTO max_id FROM running_log;
+                    
+                    -- Пересоздаем колонку как SERIAL
                     ALTER TABLE running_log ALTER COLUMN log_id DROP DEFAULT;
+                    ALTER TABLE running_log ALTER COLUMN log_id SET DATA TYPE INTEGER;
+                    CREATE SEQUENCE IF NOT EXISTS running_log_log_id_seq OWNED BY running_log.log_id;
+                    ALTER TABLE running_log ALTER COLUMN log_id SET DEFAULT nextval('running_log_log_id_seq');
                     
-                    -- Удаляем старую последовательность, если она существует
-                    DROP SEQUENCE IF EXISTS running_log_log_id_seq;
-                    
-                    -- Создаем новую последовательность
-                    CREATE SEQUENCE running_log_log_id_seq;
-                    
-                    -- Устанавливаем следующее значение после максимального
-                    PERFORM setval('running_log_log_id_seq', COALESCE((SELECT MAX(log_id) FROM running_log), 0));
-                    
-                    -- Привязываем последовательность к колонке
-                    ALTER TABLE running_log ALTER COLUMN log_id 
-                    SET DEFAULT nextval('running_log_log_id_seq');
+                    -- Устанавливаем следующее значение
+                    PERFORM setval('running_log_log_id_seq', max_id);
                 END $$;
             """))
             connection.commit()
-            logger.info("Running log sequence recreated successfully")
+            logger.info("Running log ID column fixed successfully")
         except Exception as e:
-            logger.error(f"Error recreating sequence: {e}")
+            logger.error(f"Error fixing log_id column: {e}")
             raise 
