@@ -11,7 +11,7 @@ from typing import List
 class RunningLog(Base):
     __tablename__ = "running_log"
 
-    log_id = Column(Integer, primary_key=True, autoincrement=True)
+    log_id = Column(Integer, primary_key=True, server_default=text("nextval('running_log_log_id_seq')"))
     user_id = Column(String, ForeignKey("users.user_id"))
     km = Column(Float)
     date_added = Column(Date)
