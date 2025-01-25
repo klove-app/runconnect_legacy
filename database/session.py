@@ -17,20 +17,6 @@ engine = create_engine(
 )
 logger.info("Database engine created")
 
-# Создаем фабрику сессий
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-logger.info("Session factory created")
-
 # Создаем глобальную сессию для использования в моделях
 Session = sessionmaker(bind=engine)
-logger.info("Global session created")
-
-def get_db():
-    """Генератор сессий базы данных"""
-    logger.debug("Creating new database session")
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        logger.debug("Closing database session")
-        db.close() 
+logger.info("Global session created") 
