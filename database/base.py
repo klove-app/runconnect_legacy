@@ -15,16 +15,32 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables created successfully")
     
-    # Сбрасываем последовательность для running_log_id
+    # Пересоздаем последовательность для running_log_id
     with engine.connect() as connection:
         try:
-            # Получаем максимальное значение log_id и устанавливаем последовательность
+            # Удаляем старую последовательность, если она существует
             connection.execute(text("""
-                SELECT setval(pg_get_serial_sequence('running_log', 'log_id'), 
-                            COALESCE((SELECT MAX(log_id) FROM running_log), 0) + 1);
+                DO $$ 
+                BEGIN
+                    -- Удаляем привязку последовательности к колонке
+                    ALTER TABLE running_log ALTER COLUMN log_id DROP DEFAULT;
+                    
+                    -- Удаляем старую последовательность, если она существует
+                    DROP SEQUENCE IF EXISTS running_log_log_id_seq;
+                    
+                    -- Создаем новую последовательность
+                    CREATE SEQUENCE running_log_log_id_seq;
+                    
+                    -- Устанавливаем следующее значение после максимального
+                    PERFORM setval('running_log_log_id_seq', COALESCE((SELECT MAX(log_id) FROM running_log), 0));
+                    
+                    -- Привязываем последовательность к колонке
+                    ALTER TABLE running_log ALTER COLUMN log_id 
+                    SET DEFAULT nextval('running_log_log_id_seq');
+                END $$;
             """))
             connection.commit()
-            logger.info("Running log sequence reset successfully")
+            logger.info("Running log sequence recreated successfully")
         except Exception as e:
-            logger.error(f"Error resetting sequence: {e}")
+            logger.error(f"Error recreating sequence: {e}")
             raise 
