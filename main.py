@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from contextlib import asynccontextmanager
 
 # Загружаем переменные окружения
 load_dotenv()
@@ -303,25 +304,9 @@ def add_watermark(image_bytes, info_text, brand_text, distance_text, distance_x)
         logger.error(traceback.format_exc())
         return None
 
-# Создаем FastAPI приложение
-app = FastAPI()
-
-@app.post(WEBHOOK_PATH)
-async def webhook(request: Request):
-    """Обработчик вебхуков от Telegram"""
-    try:
-        request_body_dict = await request.json()
-        update = telebot.types.Update.de_json(request_body_dict)
-        bot.process_new_updates([update])
-        return JSONResponse(content={"ok": True})
-    except Exception as e:
-        logger.error(f"Error processing webhook: {e}")
-        logger.error(traceback.format_exc())
-        return JSONResponse(content={"ok": False, "error": str(e)})
-
-@app.on_event("startup")
-async def startup():
-    """Действия при запуске приложения"""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Контекстный менеджер жизненного цикла приложения"""
     try:
         # Инициализируем базу данных
         Base.metadata.create_all(bind=engine)
@@ -349,21 +334,31 @@ async def startup():
             logger.info(f"Webhook set to {WEBHOOK_URL}{WEBHOOK_PATH}")
         
         logger.info("Bot startup completed")
-    except Exception as e:
-        logger.error(f"Error during startup: {e}")
-        logger.error(traceback.format_exc())
-        raise
-
-@app.on_event("shutdown")
-async def shutdown():
-    """Действия при остановке приложения"""
-    try:
+        yield
+        # Действия при остановке
         if BOT_MODE == 'webhook':
             bot.remove_webhook()
         logger.info("Bot shutdown completed")
     except Exception as e:
-        logger.error(f"Error during shutdown: {e}")
+        logger.error(f"Error during lifespan: {e}")
         logger.error(traceback.format_exc())
+        raise
+
+# Создаем FastAPI приложение
+app = FastAPI(lifespan=lifespan)
+
+@app.post(WEBHOOK_PATH)
+async def webhook(request: Request):
+    """Обработчик вебхуков от Telegram"""
+    try:
+        request_body_dict = await request.json()
+        update = telebot.types.Update.de_json(request_body_dict)
+        bot.process_new_updates([update])
+        return JSONResponse(content={"ok": True})
+    except Exception as e:
+        logger.error(f"Error processing webhook: {e}")
+        logger.error(traceback.format_exc())
+        return JSONResponse(content={"ok": False, "error": str(e)})
 
 if __name__ == "__main__":
     try:
