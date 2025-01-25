@@ -364,12 +364,21 @@ if __name__ == "__main__":
     try:
         if BOT_MODE == 'webhook':
             # Запускаем веб-сервер
+            logger.info(f"Starting bot in webhook mode on {HOST}:{PORT}")
             uvicorn.run(app, host=HOST, port=PORT)
         else:
             # Запускаем бота в режиме polling
             logger.info("Starting bot in polling mode")
-            bot.remove_webhook()
-            bot.infinity_polling()
+            try:
+                bot.remove_webhook()
+                logger.info("Webhook removed")
+                logger.info("Starting infinity polling...")
+                bot.infinity_polling(timeout=60, long_polling_timeout=60)
+            except Exception as e:
+                logger.error(f"Error in polling mode: {e}")
+                logger.error(traceback.format_exc())
+                raise
     except Exception as e:
         logger.error(f"Error running bot: {e}")
         logger.error(traceback.format_exc())
+        raise
