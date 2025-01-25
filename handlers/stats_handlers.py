@@ -5,7 +5,7 @@ from datetime import datetime
 import traceback
 from handlers.base_handler import BaseHandler
 import calendar
-from database.base import SessionLocal
+from database.session import Session
 from telebot.apihelper import ApiTelegramException
 
 class StatsHandler(BaseHandler):
@@ -195,7 +195,7 @@ class StatsHandler(BaseHandler):
             # Используем переданную сессию или создаем новую
             if db is None:
                 self.logger.debug("Creating new database session")
-                db = SessionLocal()
+                db = Session()
             else:
                 self.logger.debug("Using existing database session")
             
@@ -383,7 +383,7 @@ class StatsHandler(BaseHandler):
             user_id = str(call.from_user.id)
             
             # Используем одну сессию для всех операций
-            db = SessionLocal()
+            db = Session()
             try:
                 # Получаем или создаем пользователя
                 user = db.query(User).filter(User.user_id == user_id).first()
@@ -732,7 +732,7 @@ class StatsHandler(BaseHandler):
             user_id = str(call.from_user.id)
             
             # Получаем пробежку из базы
-            db = SessionLocal()
+            db = Session()
             try:
                 run = db.query(RunningLog).filter(
                     RunningLog.log_id == run_id,
@@ -818,7 +818,7 @@ class StatsHandler(BaseHandler):
                 return
             
             # Обновляем дистанцию пробежки
-            db = SessionLocal()
+            db = Session()
             try:
                 run = db.query(RunningLog).filter(
                     RunningLog.log_id == run_id,
@@ -892,7 +892,7 @@ class StatsHandler(BaseHandler):
         """Обрабатывает нажатие на кнопку возврата к профилю"""
         try:
             # Создаем новое сообщение профиля
-            db = SessionLocal()
+            db = Session()
             try:
                 user_id = str(call.from_user.id)
                 self.handle_profile(call.message, user_id, db)
@@ -914,7 +914,7 @@ class StatsHandler(BaseHandler):
             user_id = str(call.from_user.id)
             
             # Удаляем пробежку
-            db = SessionLocal()
+            db = Session()
             try:
                 run = db.query(RunningLog).filter(
                     RunningLog.log_id == run_id,
