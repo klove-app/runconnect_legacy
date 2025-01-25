@@ -2,9 +2,9 @@ from sqlalchemy import Column, Integer, String, Float, Date, ForeignKey, DECIMAL
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import text, func, extract
 from datetime import datetime
-from database.base import Base
-from database.session import Session
-from database.logger import logger
+from runconnect_legacy.database.base import Base
+from runconnect_legacy.database.session import Session
+from runconnect_legacy.database.logger import logger
 import traceback
 from typing import List
 
