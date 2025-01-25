@@ -8,6 +8,7 @@ import calendar
 from database.session import Session
 from telebot.apihelper import ApiTelegramException
 from telebot import TeleBot
+from database.logger import logger
 
 class StatsHandler(BaseHandler):
     def __init__(self, bot: TeleBot):
@@ -15,7 +16,7 @@ class StatsHandler(BaseHandler):
 
     def register(self):
         """Регистрирует обработчики статистики"""
-        self.logger.info("Registering stats handlers")
+        logger.info("Registering stats command handlers...")
         
         # Регистрируем обработчики команд напрямую
         self.bot.register_message_handler(
@@ -82,7 +83,7 @@ class StatsHandler(BaseHandler):
             func=lambda call: call.data == 'new_run' or call.data.startswith('quick_run_')
         )
         
-        self.logger.info("Stats handlers registered successfully")
+        logger.info("Stats handlers registered successfully")
 
     def handle_stats(self, message: Message):
         """Показывает статистику пользователя"""

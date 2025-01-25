@@ -386,6 +386,48 @@ async def webhook(request: Request):
 
 if __name__ == "__main__":
     try:
+        # Инициализируем базу данных
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database initialized")
+        
+        # Регистрируем все обработчики
+        logger.info("Starting handlers registration...")
+        
+        logger.info("Registering chat handlers...")
+        register_chat_handlers(bot)
+        
+        logger.info("Registering challenge handlers...")
+        register_challenge_handlers(bot)
+        
+        logger.info("Registering team handlers...")
+        register_team_handlers(bot)
+        
+        logger.info("Registering stats handlers...")
+        register_stats_handlers(bot)
+        
+        logger.info("Registering goal handlers...")
+        register_goal_handlers(bot)
+        
+        logger.info("Registering chat goal handlers...")
+        register_chat_goal_handlers(bot)
+        
+        logger.info("Registering reset handlers...")
+        ResetHandler(bot)
+        
+        logger.info("Registering admin handlers...")
+        AdminHandler(bot)
+        
+        logger.info("Registering donate handlers...")
+        DonateHandler(bot)
+        
+        logger.info("Registering message handlers...")
+        message_handlers.register_handlers(bot)
+        
+        logger.info("Registering private handlers...")
+        private_handlers.register_handlers(bot)
+        
+        logger.info("All handlers registered successfully")
+
         if BOT_MODE == 'webhook':
             # Запускаем веб-сервер
             logger.info(f"Starting bot in webhook mode on {HOST}:{PORT}")
