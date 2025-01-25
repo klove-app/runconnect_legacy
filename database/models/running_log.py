@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Date, ForeignKey, DECIMAL, Interval
+from sqlalchemy import Column, Integer, String, Float, Date, ForeignKey, DECIMAL, Interval, Sequence
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import text, func, extract
 from datetime import datetime
@@ -11,7 +11,7 @@ from typing import List
 class RunningLog(Base):
     __tablename__ = "running_log"
 
-    log_id = Column(Integer, primary_key=True, index=True)
+    log_id = Column(Integer, Sequence('running_log_log_id_seq'), primary_key=True, index=True)
     user_id = Column(String, ForeignKey("users.user_id"))
     km = Column(Float)
     date_added = Column(Date)
@@ -34,7 +34,13 @@ class RunningLog(Base):
                     logger.warning(f"Attempt to add run with distance {km} km for user {user_id}")
                     return False
                     
+                # Получаем следующее значение для log_id
+                result = session.execute(text("SELECT nextval('running_log_log_id_seq')"))
+                next_id = result.scalar()
+                logger.debug(f"Got next log_id: {next_id}")
+                
                 log_entry = cls(
+                    log_id=next_id,
                     user_id=user_id,
                     km=km,
                     date_added=date_added,
