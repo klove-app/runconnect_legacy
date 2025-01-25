@@ -26,8 +26,8 @@ STABLE_DIFFUSION_ENGINE_ID = 'stable-diffusion-xl-1024-v1-0'
 # Настройки веб-сервера
 PORT = int(os.getenv('PORT', 8000))
 HOST = os.getenv('HOST', '0.0.0.0')
-WEBHOOK_URL = os.getenv('WEBHOOK_URL', f'https://{os.getenv("RAILWAY_PUBLIC_DOMAIN")}/webhook')
+WEBHOOK_URL = os.getenv('WEBHOOK_URL')  # Должен быть установлен явно в Railway
 WEBHOOK_PATH = os.getenv('WEBHOOK_PATH', '/webhook')
 
 # Режим работы (polling или webhook)
-BOT_MODE = os.getenv('BOT_MODE', 'webhook')  # Меняем дефолтный режим на webhook для Railway
+BOT_MODE = os.getenv('BOT_MODE', 'polling')  # Используем polling по умолчанию

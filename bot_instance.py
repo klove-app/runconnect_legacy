@@ -1,9 +1,8 @@
 import os
 from telebot import TeleBot
+from config.config import BOT_TOKEN, logger
 
-# Получаем токен напрямую из переменной окружения
-BOT_TOKEN = os.getenv('BOT_TOKEN')
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN environment variable is not set")
-
-bot = TeleBot(BOT_TOKEN) 
+# Создаем экземпляр бота
+logger.info("Creating bot instance")
+bot = TeleBot(BOT_TOKEN, parse_mode='HTML')
+logger.info("Bot instance created successfully") 
