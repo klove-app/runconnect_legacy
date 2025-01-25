@@ -11,23 +11,20 @@ def init_db():
     """Инициализирует базу данных"""
     logger.info("Creating database tables...")
     
-    # Создаем последовательность для running_log_id, если она не существует
-    with engine.connect() as connection:
-        try:
-            connection.execute(text("""
-                DO $$ 
-                BEGIN
-                    CREATE SEQUENCE IF NOT EXISTS running_log_log_id_seq;
-                    -- Получаем максимальное значение log_id
-                    PERFORM setval('running_log_log_id_seq', COALESCE((SELECT MAX(log_id) FROM running_log), 0));
-                END $$;
-            """))
-            connection.commit()
-            logger.info("Sequence running_log_log_id_seq initialized")
-        except Exception as e:
-            logger.error(f"Error initializing sequence: {e}")
-            raise
-    
     # Создаем таблицы
     Base.metadata.create_all(bind=engine)
-    logger.info("Database tables created successfully") 
+    logger.info("Database tables created successfully")
+    
+    # Сбрасываем последовательность для running_log_id
+    with engine.connect() as connection:
+        try:
+            # Получаем максимальное значение log_id и устанавливаем последовательность
+            connection.execute(text("""
+                SELECT setval(pg_get_serial_sequence('running_log', 'log_id'), 
+                            COALESCE((SELECT MAX(log_id) FROM running_log), 0) + 1);
+            """))
+            connection.commit()
+            logger.info("Running log sequence reset successfully")
+        except Exception as e:
+            logger.error(f"Error resetting sequence: {e}")
+            raise 
