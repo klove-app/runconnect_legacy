@@ -1,9 +1,10 @@
-from sqlalchemy import Column, Integer, String, Float, Date, ForeignKey, func, extract
+from sqlalchemy import Column, Integer, String, Float, Date, ForeignKey, DECIMAL, Interval
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import text, func, extract
 from datetime import datetime
-from database.base import Base, get_db, Session, SessionLocal
+from database.base import Base
+from database.session import Session
 from database.logger import logger
-from database.db import get_connection
 import traceback
 from typing import List
 
@@ -22,118 +23,132 @@ class RunningLog(Base):
     user = relationship("User", back_populates="runs")
 
     @classmethod
-    def add_entry(cls, user_id: str, km: float, date_added: datetime.date, notes: str = None, chat_id: str = None, chat_type: str = None, db = None) -> bool:
+    def add_entry(cls, user_id: str, km: float, date_added: datetime.date, notes: str = None, chat_id: str = None, chat_type: str = None) -> bool:
         """Добавить новую запись о пробежке"""
         logger.info(f"Adding new run entry for user {user_id}: {km} km, chat_id: {chat_id}, chat_type: {chat_type}")
         
-        if db is None:
-            logger.debug("Creating new database session")
-            db = SessionLocal()
-            should_close = True
-        else:
-            logger.debug("Using existing database session")
-            should_close = False
-            
-        try:
-            # Проверяем максимальную дистанцию
-            if km > 100:
-                logger.warning(f"Attempt to add run with distance {km} km for user {user_id}")
-                return False
+        with Session() as session:
+            try:
+                # Проверяем максимальную дистанцию
+                if km > 100:
+                    logger.warning(f"Attempt to add run with distance {km} km for user {user_id}")
+                    return False
+                    
+                log_entry = cls(
+                    user_id=user_id,
+                    km=km,
+                    date_added=date_added,
+                    notes=notes,
+                    chat_id=chat_id,
+                    chat_type=chat_type
+                )
+                logger.debug(f"Created log entry: {log_entry.__dict__}")
                 
-            log_entry = cls(
-                user_id=user_id,
-                km=km,
-                date_added=date_added,
-                notes=notes,
-                chat_id=chat_id,
-                chat_type=chat_type
-            )
-            logger.debug(f"Created log entry: {log_entry.__dict__}")
-            
-            db.add(log_entry)
-            logger.debug("Added log entry to session")
-            
-            db.commit()
-            logger.info(f"Successfully committed run entry for user {user_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Error adding run entry: {e}")
-            logger.error(f"Full traceback: {traceback.format_exc()}")
-            db.rollback()
-            return False
-        finally:
-            if should_close:
-                logger.debug("Closing database session")
-                db.close()
+                session.add(log_entry)
+                logger.debug("Added log entry to session")
+                
+                session.commit()
+                logger.info(f"Successfully committed run entry for user {user_id}")
+                return True
+            except Exception as e:
+                logger.error(f"Error adding run entry: {e}")
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                session.rollback()
+                return False
 
     @classmethod
-    def get_user_total_km(cls, user_id: str, chat_type: str = None, db = None) -> float:
+    def get_user_total_km(cls, user_id: str, chat_type: str = None) -> float:
         """Получить общую дистанцию пользователя за текущий год"""
         logger.info(f"Getting total km for user {user_id}, chat_type: {chat_type}")
         
-        if db is None:
-            logger.debug("Creating new database session")
-            db = SessionLocal()
-            should_close = True
-        else:
-            logger.debug("Using existing database session")
-            should_close = False
-            
-        try:
-            current_year = datetime.now().year
-            query = db.query(cls).with_entities(
-                func.sum(cls.km)
-            ).filter(
-                cls.user_id == user_id,
-                extract('year', cls.date_added) == current_year
-            )
-            
-            logger.debug(f"Executing query: {query}")
-            result = query.scalar()
-            logger.info(f"Total km for user {user_id}: {result or 0.0}")
-            return result or 0.0
-        except Exception as e:
-            logger.error(f"Error getting total km: {e}")
-            logger.error(f"Full traceback: {traceback.format_exc()}")
-            return 0.0
-        finally:
-            if should_close:
-                logger.debug("Closing database session")
-                db.close()
+        with Session() as session:
+            try:
+                current_year = datetime.now().year
+                query = session.query(cls).with_entities(
+                    func.sum(cls.km)
+                ).filter(
+                    cls.user_id == user_id,
+                    extract('year', cls.date_added) == current_year
+                )
+                
+                if chat_type:
+                    query = query.filter(cls.chat_type == chat_type)
+                
+                logger.debug(f"Executing query: {query}")
+                result = query.scalar()
+                logger.info(f"Total km for user {user_id}: {result or 0.0}")
+                return float(result or 0.0)
+            except Exception as e:
+                logger.error(f"Error getting total km: {e}")
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                return 0.0
+
+    @classmethod
+    def get_user_stats(cls, user_id: str, year: int, month: int = None) -> dict:
+        """Получить статистику пользователя"""
+        with Session() as session:
+            try:
+                query = session.query(
+                    func.count().label('runs_count'),
+                    func.sum(cls.km).label('total_km'),
+                    func.avg(cls.km).label('avg_km')
+                ).filter(
+                    cls.user_id == user_id,
+                    extract('year', cls.date_added) == year
+                )
+                
+                if month:
+                    query = query.filter(extract('month', cls.date_added) == month)
+                
+                result = query.first()
+                
+                return {
+                    'runs_count': result.runs_count or 0,
+                    'total_km': float(result.total_km or 0),
+                    'avg_km': float(result.avg_km or 0)
+                }
+            except Exception as e:
+                logger.error(f"Error getting user stats: {e}")
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                return {
+                    'runs_count': 0,
+                    'total_km': 0.0,
+                    'avg_km': 0.0
+                }
 
     @classmethod
     def get_top_runners(cls, limit: int = 10, year: int = None) -> list:
-        """Получить топ бегунов за год (включая всех пользователей)"""
+        """Получить топ бегунов за год"""
         if year is None:
             year = datetime.now().year
             
-        db = next(get_db())
-        try:
-            results = db.query(
-                cls.user_id,
-                func.sum(cls.km).label('total_km'),
-                func.count().label('runs_count'),
-                func.avg(cls.km).label('avg_km'),
-                func.max(cls.km).label('best_run')
-            ).filter(
-                extract('year', cls.date_added) == year
-            ).group_by(
-                cls.user_id
-            ).order_by(
-                func.sum(cls.km).desc()
-            ).limit(limit).all()
-            
-            return [{
-                'user_id': r.user_id,
-                'total_km': float(r.total_km or 0),
-                'runs_count': r.runs_count,
-                'avg_km': float(r.avg_km or 0),
-                'best_run': float(r.best_run or 0)
-            } for r in results]
-        except Exception as e:
-            logger.error(f"Error getting top runners: {e}")
-            logger.error(f"Full traceback: {traceback.format_exc()}")
-            return []
+        with Session() as session:
+            try:
+                results = session.query(
+                    cls.user_id,
+                    func.sum(cls.km).label('total_km'),
+                    func.count().label('runs_count'),
+                    func.avg(cls.km).label('avg_km'),
+                    func.max(cls.km).label('best_run')
+                ).filter(
+                    extract('year', cls.date_added) == year
+                ).group_by(
+                    cls.user_id
+                ).order_by(
+                    func.sum(cls.km).desc()
+                ).limit(limit).all()
+                
+                return [{
+                    'user_id': r.user_id,
+                    'total_km': float(r.total_km or 0),
+                    'runs_count': r.runs_count,
+                    'avg_km': float(r.avg_km or 0),
+                    'best_run': float(r.best_run or 0)
+                } for r in results]
+            except Exception as e:
+                logger.error(f"Error getting top runners: {e}")
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                return []
 
     @classmethod
     def get_user_global_rank(cls, user_id: str, year: int = None) -> dict:
@@ -141,47 +156,47 @@ class RunningLog(Base):
         if year is None:
             year = datetime.now().year
             
-        db = next(get_db())
-        try:
-            # Подзапрос для получения общего километража каждого пользователя
-            subq = db.query(
-                cls.user_id,
-                func.sum(cls.km).label('total_km')
-            ).filter(
-                extract('year', cls.date_added) == year
-            ).group_by(
-                cls.user_id
-            ).subquery()
-            
-            # Получаем ранг пользователя
-            rank_query = db.query(
-                func.row_number().over(
-                    order_by=subq.c.total_km.desc()
-                ).label('rank'),
-                subq.c.user_id,
-                subq.c.total_km
-            ).from_self().filter(
-                subq.c.user_id == user_id
-            ).first()
-            
-            if rank_query:
-                total_users = db.query(
-                    func.count(func.distinct(cls.user_id))
+        with Session() as session:
+            try:
+                # Подзапрос для получения общего километража каждого пользователя
+                subq = session.query(
+                    cls.user_id,
+                    func.sum(cls.km).label('total_km')
                 ).filter(
                     extract('year', cls.date_added) == year
-                ).scalar()
+                ).group_by(
+                    cls.user_id
+                ).subquery()
                 
-                return {
-                    'rank': rank_query.rank,
-                    'total_users': total_users,
-                    'total_km': float(rank_query.total_km or 0)
-                }
-            return {'rank': 0, 'total_users': 0, 'total_km': 0.0}
-            
-        except Exception as e:
-            logger.error(f"Error getting user global rank: {e}")
-            logger.error(f"Full traceback: {traceback.format_exc()}")
-            return {'rank': 0, 'total_users': 0, 'total_km': 0.0}
+                # Получаем ранг пользователя
+                rank_query = session.query(
+                    func.row_number().over(
+                        order_by=subq.c.total_km.desc()
+                    ).label('rank'),
+                    subq.c.user_id,
+                    subq.c.total_km
+                ).from_self().filter(
+                    subq.c.user_id == user_id
+                ).first()
+                
+                if rank_query:
+                    total_users = session.query(
+                        func.count(func.distinct(cls.user_id))
+                    ).filter(
+                        extract('year', cls.date_added) == year
+                    ).scalar()
+                    
+                    return {
+                        'rank': rank_query.rank,
+                        'total_users': total_users,
+                        'total_km': float(rank_query.total_km or 0)
+                    }
+                return {'rank': 0, 'total_users': 0, 'total_km': 0.0}
+                
+            except Exception as e:
+                logger.error(f"Error getting user global rank: {e}")
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                return {'rank': 0, 'total_users': 0, 'total_km': 0.0}
 
     @classmethod
     def get_personal_stats(cls, user_id: str, year: int = None) -> dict:
@@ -189,58 +204,58 @@ class RunningLog(Base):
         if year is None:
             year = datetime.now().year
             
-        db = next(get_db())
-        try:
-            # Базовая статистика
-            base_stats = cls.get_user_stats(user_id, year)
-            
-            # Дополнительная статистика
-            additional_stats = db.query(
-                func.max(cls.km).label('longest_run'),
-                func.min(cls.km).label('shortest_run'),
-                func.avg(cls.km).label('average_run'),
-                func.count(func.distinct(cls.date_added)).label('active_days')
-            ).filter(
-                cls.user_id == user_id,
-                extract('year', cls.date_added) == year
-            ).first()
-            
-            # Статистика по месяцам
-            monthly_stats = db.query(
-                extract('month', cls.date_added).label('month'),
-                func.sum(cls.km).label('monthly_km')
-            ).filter(
-                cls.user_id == user_id,
-                extract('year', cls.date_added) == year
-            ).group_by(
-                extract('month', cls.date_added)
-            ).all()
-            
-            return {
-                **base_stats,
-                'longest_run': float(additional_stats.longest_run or 0),
-                'shortest_run': float(additional_stats.shortest_run or 0),
-                'average_run': float(additional_stats.average_run or 0),
-                'active_days': additional_stats.active_days or 0,
-                'monthly_progress': [
-                    {'month': int(stat.month), 'km': float(stat.monthly_km or 0)}
-                    for stat in monthly_stats
-                ]
-            }
-            
-        except Exception as e:
-            logger.error(f"Error getting personal stats: {e}")
-            logger.error(f"Full traceback: {traceback.format_exc()}")
-            return {
-                'runs_count': 0,
-                'total_km': 0.0,
-                'avg_km': 0.0,
-                'longest_run': 0.0,
-                'shortest_run': 0.0,
-                'average_run': 0.0,
-                'active_days': 0,
-                'monthly_progress': []
-            }
+        with Session() as session:
+            try:
+                # Базовая статистика
+                base_stats = cls.get_user_stats(user_id, year)
+                
+                # Дополнительная статистика
+                additional_stats = session.query(
+                    func.max(cls.km).label('longest_run'),
+                    func.min(cls.km).label('shortest_run'),
+                    func.avg(cls.km).label('average_run'),
+                    func.count(func.distinct(cls.date_added)).label('active_days')
+                ).filter(
+                    cls.user_id == user_id,
+                    extract('year', cls.date_added) == year
+                ).first()
+                
+                # Статистика по месяцам
+                monthly_stats = session.query(
+                    extract('month', cls.date_added).label('month'),
+                    func.sum(cls.km).label('monthly_km')
+                ).filter(
+                    cls.user_id == user_id,
+                    extract('year', cls.date_added) == year
+                ).group_by(
+                    extract('month', cls.date_added)
+                ).all()
+                
+                return {
+                    **base_stats,
+                    'longest_run': float(additional_stats.longest_run or 0),
+                    'shortest_run': float(additional_stats.shortest_run or 0),
+                    'average_run': float(additional_stats.average_run or 0),
+                    'active_days': additional_stats.active_days or 0,
+                    'monthly_progress': [
+                        {'month': int(stat.month), 'km': float(stat.monthly_km or 0)}
+                        for stat in monthly_stats
+                    ]
+                }
+                
+            except Exception as e:
+                logger.error(f"Error getting personal stats: {e}")
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                return {
+                    'runs_count': 0,
+                    'total_km': 0.0,
+                    'avg_km': 0.0,
+                    'longest_run': 0.0,
+                    'shortest_run': 0.0,
+                    'average_run': 0.0,
+                    'active_days': 0,
+                    'monthly_progress': []
+                }
 
     @classmethod
     def get_user_runs(cls, user_id: str, limit: int = 5) -> List['RunningLog']:
@@ -255,100 +270,38 @@ class RunningLog(Base):
             return query.all()
 
     @classmethod
-    def get_user_stats(cls, user_id: str, year: int, month: int = None, db = None):
-        """Получить статистику пользователя за год или месяц"""
-        logger.info(f"Getting stats for user {user_id}, year: {year}, month: {month}")
-        
-        if db is None:
-            logger.debug("Creating new database session")
-            db = SessionLocal()
-            should_close = True
-        else:
-            logger.debug("Using existing database session")
-            should_close = False
-            
-        try:
-            # Базовый запрос
-            query = db.query(
-                func.count().label('runs_count'),
-                func.sum(cls.km).label('total_km'),
-                func.avg(cls.km).label('avg_km')
-            ).filter(
-                cls.user_id == user_id,
-                extract('year', cls.date_added) == year
-            )
-            
-            # Добавляем фильтр по месяцу, если указан
-            if month:
-                query = query.filter(extract('month', cls.date_added) == month)
-            
-            logger.debug(f"Executing query: {query}")
-            result = query.first()
-            
-            stats = {
-                'runs_count': result.runs_count or 0,
-                'total_km': float(result.total_km or 0),
-                'avg_km': float(result.avg_km or 0)
-            }
-            
-            logger.info(f"Stats for user {user_id}: {stats}")
-            return stats
-            
-        except Exception as e:
-            logger.error(f"Error getting user stats: {e}")
-            logger.error(f"Full traceback: {traceback.format_exc()}")
-            return {
-                'runs_count': 0,
-                'total_km': 0.0,
-                'avg_km': 0.0
-            }
-        finally:
-            if should_close:
-                logger.debug("Closing database session")
-                db.close()
-
-    @classmethod
-    def get_best_stats(cls, user_id: str, chat_type: str = None, db = None):
+    def get_best_stats(cls, user_id: str, chat_type: str = None) -> dict:
         """Получить лучшие показатели пользователя"""
-        if db is None:
-            db = SessionLocal()
-            should_close = True
-        else:
-            should_close = False
-            
-        try:
-            query = db.query(
-                func.max(cls.km).label('best_run'),
-                func.count().label('total_runs'),
-                func.sum(cls.km).label('total_km')
-            ).filter(
-                cls.user_id == user_id
-            )
-            
-            if chat_type:
-                query = query.filter(cls.chat_type == chat_type)
+        with Session() as session:
+            try:
+                query = session.query(
+                    func.max(cls.km).label('best_run'),
+                    func.count().label('total_runs'),
+                    func.sum(cls.km).label('total_km')
+                ).filter(
+                    cls.user_id == user_id
+                )
                 
-            result = query.first()
-            
-            return {
-                'best_run': float(result.best_run or 0),
-                'total_runs': result.total_runs or 0,
-                'total_km': float(result.total_km or 0)
-            }
-        except Exception as e:
-            logger.error(f"Error getting best stats: {e}")
-            logger.error(f"Full traceback: {traceback.format_exc()}")
-            return {'best_run': 0.0, 'total_runs': 0, 'total_km': 0.0}
-        finally:
-            if should_close:
-                db.close()
+                if chat_type:
+                    query = query.filter(cls.chat_type == chat_type)
+                    
+                result = query.first()
+                
+                return {
+                    'best_run': float(result.best_run or 0),
+                    'total_runs': result.total_runs or 0,
+                    'total_km': float(result.total_km or 0)
+                }
+            except Exception as e:
+                logger.error(f"Error getting best stats: {e}")
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                return {'best_run': 0.0, 'total_runs': 0, 'total_km': 0.0}
 
     @classmethod
     def get_recent_runs(cls, user_id: str, chat_type: str = None, limit: int = 5):
         """Получить последние пробежки пользователя"""
-        db = next(get_db())
-        try:
-            query = db.query(cls).filter(
+        with Session() as session:
+            query = session.query(cls).filter(
                 cls.user_id == user_id
             )
             
@@ -360,9 +313,6 @@ class RunningLog(Base):
             ).limit(limit).all()
 
             return [{'date': run.date_added, 'distance_km': run.km} for run in runs]
-        except Exception as e:
-            logger.error(f"Error getting recent runs: {e}")
-            return []
 
     @classmethod
     def get_chat_stats(cls, chat_id: str, year: int = None, month: int = None, chat_type: str = None):
@@ -370,73 +320,75 @@ class RunningLog(Base):
         if year is None:
             year = datetime.now().year
             
-        db = next(get_db())
-        try:
-            # Получаем всех пользователей, которые бегали в этом году
-            base_query = db.query(cls).filter(
-                extract('year', cls.date_added) == year
-            )
-            
-            if month:
-                base_query = base_query.filter(extract('month', cls.date_added) == month)
-            
-            # Получаем статистику
-            stats = base_query.with_entities(
-                func.count().label('runs_count'),
-                func.sum(cls.km).label('total_km'),
-                func.avg(cls.km).label('avg_km'),
-                func.max(cls.km).label('best_run')
-            ).first()
-            
-            # Получаем количество уникальных пользователей
-            users_count = base_query.with_entities(
-                func.count(func.distinct(cls.user_id))
-            ).scalar() or 0
-            
-            # Проверяем, что результаты не None
-            runs_count = stats[0] if stats[0] is not None else 0
-            total_km = float(stats[1]) if stats[1] is not None else 0.0
-            avg_km = float(stats[2]) if stats[2] is not None else 0.0
-            best_run = float(stats[3]) if stats[3] is not None else 0.0
-            
-            # Получаем статистику по месяцам, если запрошен год
-            monthly_stats = []
-            if not month:
-                monthly_query = db.query(
-                    extract('month', cls.date_added).label('month'),
-                    func.sum(cls.km).label('monthly_km')
+        with Session() as session:
+            try:
+                # Получаем всех пользователей, которые бегали в этом году
+                base_query = session.query(cls).filter(
+                    extract('year', cls.date_added) == year
+                )
+                
+                if month:
+                    base_query = base_query.filter(extract('month', cls.date_added) == month)
+                
+                # Получаем статистику
+                stats = base_query.with_entities(
+                    func.count().label('runs_count'),
+                    func.sum(cls.km).label('total_km'),
+                    func.avg(cls.km).label('avg_km'),
+                    func.max(cls.km).label('best_run')
+                ).first()
+                
+                # Получаем количество уникальных пользователей
+                users_count = session.query(
+                    func.count(func.distinct(cls.user_id))
                 ).filter(
                     extract('year', cls.date_added) == year
-                ).group_by(
-                    extract('month', cls.date_added)
-                ).order_by(
-                    extract('month', cls.date_added)
-                ).all()
+                ).scalar() or 0
                 
-                monthly_stats = [{
-                    'month': int(r.month),
-                    'total_km': float(r.monthly_km or 0)
-                } for r in monthly_query]
-            
-            return {
-                'users_count': users_count,
-                'runs_count': runs_count,
-                'total_km': total_km,
-                'avg_km': avg_km,
-                'best_run': best_run,
-                'monthly_stats': monthly_stats
-            }
-        except Exception as e:
-            logger.error(f"Error getting chat stats: {e}")
-            logger.error(f"Full traceback: {traceback.format_exc()}")
-            return {
-                'users_count': 0,
-                'runs_count': 0,
-                'total_km': 0.0,
-                'avg_km': 0.0,
-                'best_run': 0.0,
-                'monthly_stats': []
-            }
+                # Проверяем, что результаты не None
+                runs_count = stats[0] if stats[0] is not None else 0
+                total_km = float(stats[1]) if stats[1] is not None else 0.0
+                avg_km = float(stats[2]) if stats[2] is not None else 0.0
+                best_run = float(stats[3]) if stats[3] is not None else 0.0
+                
+                # Получаем статистику по месяцам, если запрошен год
+                monthly_stats = []
+                if not month:
+                    monthly_query = session.query(
+                        extract('month', cls.date_added).label('month'),
+                        func.sum(cls.km).label('monthly_km')
+                    ).filter(
+                        extract('year', cls.date_added) == year
+                    ).group_by(
+                        extract('month', cls.date_added)
+                    ).order_by(
+                        extract('month', cls.date_added)
+                    ).all()
+                    
+                    monthly_stats = [{
+                        'month': int(r.month),
+                        'total_km': float(r.monthly_km or 0)
+                    } for r in monthly_query]
+                
+                return {
+                    'users_count': users_count,
+                    'runs_count': runs_count,
+                    'total_km': total_km,
+                    'avg_km': avg_km,
+                    'best_run': best_run,
+                    'monthly_stats': monthly_stats
+                }
+            except Exception as e:
+                logger.error(f"Error getting chat stats: {e}")
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                return {
+                    'users_count': 0,
+                    'runs_count': 0,
+                    'total_km': 0.0,
+                    'avg_km': 0.0,
+                    'best_run': 0.0,
+                    'monthly_stats': []
+                }
 
     @classmethod
     def get_chat_top_users(cls, chat_id: str, year: int = None, limit: int = 5, chat_type: str = None):
@@ -444,33 +396,33 @@ class RunningLog(Base):
         if year is None:
             year = datetime.now().year
             
-        db = next(get_db())
-        try:
-            query = db.query(
-                cls.user_id,
-                func.sum(cls.km).label('total_km'),
-                func.count().label('runs_count'),
-                func.avg(cls.km).label('avg_km'),
-                func.max(cls.km).label('best_run')
-            ).filter(
-                extract('year', cls.date_added) == year
-            ).group_by(
-                cls.user_id
-            ).order_by(
-                func.sum(cls.km).desc()
-            ).limit(limit).all()
-            
-            return [{
-                'user_id': r.user_id,
-                'total_km': float(r.total_km or 0),
-                'runs_count': r.runs_count,
-                'avg_km': float(r.avg_km or 0),
-                'best_run': float(r.best_run or 0)
-            } for r in query]
-        except Exception as e:
-            logger.error(f"Error getting chat top users: {e}")
-            logger.error(f"Full traceback: {traceback.format_exc()}")
-            return []
+        with Session() as session:
+            try:
+                query = session.query(
+                    cls.user_id,
+                    func.sum(cls.km).label('total_km'),
+                    func.count().label('runs_count'),
+                    func.avg(cls.km).label('avg_km'),
+                    func.max(cls.km).label('best_run')
+                ).filter(
+                    extract('year', cls.date_added) == year
+                ).group_by(
+                    cls.user_id
+                ).order_by(
+                    func.sum(cls.km).desc()
+                ).limit(limit).all()
+                
+                return [{
+                    'user_id': r.user_id,
+                    'total_km': float(r.total_km or 0),
+                    'runs_count': r.runs_count,
+                    'avg_km': float(r.avg_km or 0),
+                    'best_run': float(r.best_run or 0)
+                } for r in query]
+            except Exception as e:
+                logger.error(f"Error getting chat top users: {e}")
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                return []
 
     @staticmethod
     def get_chat_stats_sqlite(chat_id: str, year: int, month: int = None, chat_type: str = None) -> dict:
