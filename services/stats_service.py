@@ -1,9 +1,9 @@
-from runconnect_legacy.database.db import get_connection
-from runconnect_legacy.utils.formatters import round_km
+from database.db import get_connection
+from utils.formatters import round_km
 from datetime import datetime
 from functools import lru_cache
 from sqlalchemy.sql import text
-from runconnect_legacy.database.session import Session
+from database.session import Session
 
 class StatsService:
     @staticmethod
