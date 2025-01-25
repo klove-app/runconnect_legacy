@@ -1,8 +1,8 @@
-from sqlalchemy import Column, String, Float, DateTime, Integer, Boolean, ForeignKey, func, text
+from sqlalchemy import Column, Integer, String, DateTime, Date, Float, Boolean, ForeignKey, func, text
 from sqlalchemy.orm import relationship
+from datetime import datetime
 from database.base import Base
 from database.session import Session
-from datetime import datetime
 from utils.formatters import round_km
 import traceback
 import logging
@@ -13,15 +13,18 @@ class Challenge(Base):
     __tablename__ = "challenges"
 
     challenge_id = Column(Integer, primary_key=True, index=True)
-    title = Column(String)
+    title = Column(String(255))
+    description = Column(String(1000))
+    start_date = Column(Date)
+    end_date = Column(Date)
     goal_km = Column(Float)
-    start_date = Column(DateTime)
-    end_date = Column(DateTime)
-    chat_id = Column(String, nullable=True)
+    created_by = Column(String(255))
+    chat_id = Column(String(255))
     is_system = Column(Boolean, default=False)
     user_id = Column(String, nullable=True)
-    description = Column(String, nullable=True)
-    created_by = Column(String, nullable=True)
+
+    # Отношения
+    participants = relationship("ChallengeParticipant", back_populates="challenge")
 
     @classmethod
     def create_personal_challenge(cls, title: str, goal_km: float, start_date: datetime, 
@@ -40,6 +43,12 @@ class Challenge(Base):
             session.commit()
             session.refresh(challenge)
             return challenge
+
+    def add_participant(self, user_id):
+        """Добавляет участника в системный челлендж"""
+        # Для системного челленджа не нужно явно добавлять участников,
+        # так как учитываются все пользователи чата автоматически
+        pass
 
     @classmethod
     def get_active_challenges(cls) -> list['Challenge']:
@@ -374,4 +383,16 @@ class Challenge(Base):
             except Exception as e:
                 logger.error(f"Error getting year progress: {e}")
                 logger.error(f"Full traceback: {traceback.format_exc()}")
-                return 0.0 
+                return 0.0
+
+class ChallengeParticipant(Base):
+    __tablename__ = "challenge_participants"
+
+    challenge_id = Column(Integer, ForeignKey("challenges.challenge_id"), primary_key=True)
+    user_id = Column(String(255), ForeignKey("users.user_id"), primary_key=True)
+    progress = Column(Float, default=0)
+    completed = Column(Boolean, default=False)
+
+    # Отношения
+    challenge = relationship("Challenge", back_populates="participants")
+    user = relationship("User", back_populates="challenge_participations") 
