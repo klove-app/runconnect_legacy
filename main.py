@@ -8,6 +8,9 @@ import requests
 from io import BytesIO
 import base64
 from dotenv import load_dotenv
+import uvicorn
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 # Загружаем переменные окружения
 load_dotenv()
@@ -20,6 +23,7 @@ sys.path.append(current_dir)
 from bot_instance import bot
 from database.base import Base, engine
 from database.logger import logger
+from config.config import PORT, HOST, WEBHOOK_URL, WEBHOOK_PATH, BOT_MODE
 
 # Настройки Stability AI
 STABILITY_API_HOST = 'https://api.stability.ai'
@@ -299,32 +303,78 @@ def add_watermark(image_bytes, info_text, brand_text, distance_text, distance_x)
         logger.error(traceback.format_exc())
         return None
 
+# Создаем FastAPI приложение
+app = FastAPI()
+
+@app.post(WEBHOOK_PATH)
+async def webhook(request: Request):
+    """Обработчик вебхуков от Telegram"""
+    try:
+        request_body_dict = await request.json()
+        update = telebot.types.Update.de_json(request_body_dict)
+        bot.process_new_updates([update])
+        return JSONResponse(content={"ok": True})
+    except Exception as e:
+        logger.error(f"Error processing webhook: {e}")
+        logger.error(traceback.format_exc())
+        return JSONResponse(content={"ok": False, "error": str(e)})
+
+@app.on_event("startup")
+async def startup():
+    """Действия при запуске приложения"""
+    try:
+        # Инициализируем базу данных
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database initialized")
+        
+        # Регистрируем все обработчики
+        register_chat_handlers(bot)
+        register_challenge_handlers(bot)
+        register_team_handlers(bot)
+        register_stats_handlers(bot)
+        register_goal_handlers(bot)
+        register_chat_goal_handlers(bot)
+        ResetHandler(bot)
+        AdminHandler(bot)
+        DonateHandler(bot)
+        message_handlers.register_handlers(bot)
+        private_handlers.register_handlers(bot)
+        logger.info("All handlers registered")
+        
+        if BOT_MODE == 'webhook':
+            # Удаляем старый вебхук
+            bot.remove_webhook()
+            # Устанавливаем новый вебхук
+            bot.set_webhook(url=f"{WEBHOOK_URL}{WEBHOOK_PATH}")
+            logger.info(f"Webhook set to {WEBHOOK_URL}{WEBHOOK_PATH}")
+        
+        logger.info("Bot startup completed")
+    except Exception as e:
+        logger.error(f"Error during startup: {e}")
+        logger.error(traceback.format_exc())
+        raise
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Действия при остановке приложения"""
+    try:
+        if BOT_MODE == 'webhook':
+            bot.remove_webhook()
+        logger.info("Bot shutdown completed")
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
+        logger.error(traceback.format_exc())
+
 if __name__ == "__main__":
-    # Создаем таблицы в базе данных
-    Base.metadata.create_all(engine)
-    
-    # Регистрируем обработчики
-    register_chat_handlers(bot)
-    register_challenge_handlers(bot)
-    register_team_handlers(bot)
-    register_stats_handlers(bot)
-    register_goal_handlers(bot)
-    register_chat_goal_handlers(bot)
-    message_handlers.register_handlers(bot)
-    private_handlers.register_handlers(bot)
-    
-    # Создаем и регистрируем обработчики
-    reset_handler = ResetHandler(bot)
-    reset_handler.register()
-    
-    admin_handler = AdminHandler(bot)
-    admin_handler.register()
-    
-    donate_handler = DonateHandler(bot)
-    donate_handler.register()
-    
-    logger.info("Bot handlers registered")
-    logger.info("Bot is running...")
-    
-    # Запускаем бота
-    bot.infinity_polling()
+    try:
+        if BOT_MODE == 'webhook':
+            # Запускаем веб-сервер
+            uvicorn.run(app, host=HOST, port=PORT)
+        else:
+            # Запускаем бота в режиме polling
+            logger.info("Starting bot in polling mode")
+            bot.remove_webhook()
+            bot.infinity_polling()
+    except Exception as e:
+        logger.error(f"Error running bot: {e}")
+        logger.error(traceback.format_exc())

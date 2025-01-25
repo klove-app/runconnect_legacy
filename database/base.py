@@ -1,22 +1,20 @@
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-import os
 from database.logger import logger
-from config.config import DATABASE_NAME, DATABASE_URL
-
-# Получаем путь к базе данных
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), DATABASE_NAME)
-logger.info(f"Database path: {DB_PATH}")
+from config.config import DATABASE_URL
 
 # Создаем URL для подключения к базе данных
 SQLALCHEMY_DATABASE_URL = DATABASE_URL
 logger.info(f"Database URL: {SQLALCHEMY_DATABASE_URL}")
 
-# Создаем движок базы данных
+# Создаем движок базы данных с оптимальными параметрами для PostgreSQL
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False}
+    pool_size=5,
+    max_overflow=10,
+    pool_timeout=30,
+    pool_recycle=1800
 )
 logger.info("Database engine created")
 
@@ -46,9 +44,9 @@ def init_db():
     """Инициализация базы данных"""
     logger.info("Initializing database")
     try:
-        # Создаем все таблицы
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables created successfully")
+        # Проверяем соединение с базой данных
+        with engine.connect() as connection:
+            logger.info("Successfully connected to the database")
     except Exception as e:
-        logger.error(f"Error initializing database: {e}")
+        logger.error(f"Error connecting to database: {e}")
         raise 
