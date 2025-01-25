@@ -1,105 +1,116 @@
 from database.models.challenge import Challenge
-from database.db import get_connection
+from database.models.user import User
+from database.models.running_log import RunningLog
+from database.session import Session
 from utils.formatters import round_km
 from datetime import datetime, date
+from sqlalchemy import func, text, extract
 
 class ChallengeService:
     @staticmethod
-    def get_active_challenges():
+    def get_active_challenges() -> list[dict]:
         """Получение списка активных челленджей"""
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT c.*, COUNT(cp.user_id) as participants
-            FROM challenges c
-            LEFT JOIN challenge_participants cp ON c.challenge_id = cp.challenge_id
-            WHERE c.end_date >= date('now')
-            GROUP BY c.challenge_id
-            ORDER BY c.start_date
-        """)
-        
-        challenges = cursor.fetchall()
-        conn.close()
-        
-        return [
-            {
-                'id': row[0],
-                'title': row[1],
-                'goal_km': round_km(row[2]),
-                'start_date': row[3],
-                'end_date': row[4],
-                'description': row[5],
-                'created_by': row[6],
-                'participants_count': row[7]
-            }
-            for row in challenges
-        ]
+        with Session() as session:
+            results = session.query(
+                Challenge,
+                func.count(text('challenge_participants.user_id')).label('participants_count')
+            ).outerjoin(
+                'challenge_participants'
+            ).filter(
+                Challenge.end_date >= func.current_date()
+            ).group_by(
+                Challenge.challenge_id
+            ).order_by(
+                Challenge.start_date
+            ).all()
+            
+            return [
+                {
+                    'id': challenge.challenge_id,
+                    'title': challenge.title,
+                    'goal_km': round_km(challenge.goal_km),
+                    'start_date': challenge.start_date,
+                    'end_date': challenge.end_date,
+                    'description': challenge.description,
+                    'created_by': challenge.created_by,
+                    'participants_count': participants_count
+                }
+                for challenge, participants_count in results
+            ]
 
     @staticmethod
-    def create_challenge(title, goal_km, start_date, end_date, description, created_by):
+    def create_challenge(title: str, goal_km: float, start_date: date, 
+                        end_date: date, description: str, created_by: str) -> Challenge:
         return Challenge.create(title, goal_km, start_date, end_date, description, created_by)
 
     @staticmethod
-    def get_challenge_stats(challenge_id):
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT u.username,
-                   COALESCE(SUM(r.km), 0) as total_km,
-                   COUNT(DISTINCT r.date_added) as active_days
-            FROM challenge_participants cp
-            JOIN users u ON cp.user_id = u.user_id
-            LEFT JOIN running_log r ON u.user_id = r.user_id
-            JOIN challenges c ON cp.challenge_id = c.challenge_id
-            WHERE cp.challenge_id = ?
-            AND r.date_added BETWEEN c.start_date AND c.end_date
-            GROUP BY u.username
-            ORDER BY total_km DESC
-        """, (challenge_id,))
-        
-        results = cursor.fetchall()
-        conn.close()
-        
-        return [
-            {
-                'username': row[0],
-                'total_km': round_km(row[1]),
-                'active_days': row[2]
-            }
-            for row in results
-        ]
+    def get_challenge_stats(challenge_id: int) -> list[dict]:
+        with Session() as session:
+            challenge = session.query(Challenge).get(challenge_id)
+            if not challenge:
+                return []
+                
+            results = session.query(
+                User.username,
+                func.coalesce(func.sum(RunningLog.km), 0).label('total_km'),
+                func.count(func.distinct(RunningLog.date_added)).label('active_days')
+            ).join(
+                'challenge_participants'
+            ).outerjoin(
+                RunningLog,
+                (User.user_id == RunningLog.user_id) &
+                (RunningLog.date_added.between(challenge.start_date, challenge.end_date))
+            ).filter(
+                text('challenge_participants.challenge_id = :challenge_id')
+            ).group_by(
+                User.username
+            ).order_by(
+                func.sum(RunningLog.km).desc()
+            ).params(
+                challenge_id=challenge_id
+            ).all()
+            
+            return [
+                {
+                    'username': result.username,
+                    'total_km': round_km(result.total_km),
+                    'active_days': result.active_days
+                }
+                for result in results
+            ]
 
     @staticmethod
-    def get_user_challenges(user_id):
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT c.*, COALESCE(SUM(r.km), 0) as total_km
-            FROM challenges c
-            JOIN challenge_participants cp ON c.challenge_id = cp.challenge_id
-            LEFT JOIN running_log r ON cp.user_id = r.user_id
-            AND r.date_added BETWEEN c.start_date AND c.end_date
-            WHERE cp.user_id = ?
-            GROUP BY c.challenge_id
-            ORDER BY c.end_date DESC
-        """, (user_id,))
-        
-        challenges = cursor.fetchall()
-        conn.close()
-        
-        return [
-            {
-                'challenge': Challenge(c[0], c[1], c[2], c[3], c[4], c[5], c[6]),
-                'total_km': round_km(c[7])
-            }
-            for c in challenges
-        ]
+    def get_user_challenges(user_id: str) -> list[dict]:
+        with Session() as session:
+            results = session.query(
+                Challenge,
+                func.coalesce(func.sum(RunningLog.km), 0).label('total_km')
+            ).join(
+                'challenge_participants'
+            ).outerjoin(
+                RunningLog,
+                (text('challenge_participants.user_id = running_log.user_id')) &
+                (RunningLog.date_added.between(Challenge.start_date, Challenge.end_date))
+            ).filter(
+                text('challenge_participants.user_id = :user_id')
+            ).group_by(
+                Challenge.challenge_id
+            ).order_by(
+                Challenge.end_date.desc()
+            ).params(
+                user_id=user_id
+            ).all()
+            
+            return [
+                {
+                    'challenge': challenge,
+                    'total_km': round_km(total_km)
+                }
+                for challenge, total_km in results
+            ]
 
     @staticmethod
-    def ensure_yearly_challenge(chat_id, year):
+    def ensure_yearly_challenge(chat_id: str, year: int) -> Challenge:
         """Создает или получает годовой челлендж чата"""
         # Проверяем, существует ли уже системный челлендж для этого чата и года
         challenge = Challenge.get_system_challenge(chat_id, year)
@@ -124,7 +135,7 @@ class ChallengeService:
         return challenge
 
     @staticmethod
-    def auto_join_user(user_id, chat_id):
+    def auto_join_user(user_id: str, chat_id: str) -> None:
         """Автоматически добавляет пользователя во все системные челленджи чата"""
         current_year = datetime.now().year
         # Присоединяем к текущему и следующему году
@@ -134,7 +145,7 @@ class ChallengeService:
                 challenge.add_participant(user_id)
 
     @staticmethod
-    def update_yearly_goal(chat_id, year, goal_km):
+    def update_yearly_goal(chat_id: str, year: int, goal_km: float) -> bool:
         """Обновляет цель годового челленджа"""
         challenge = ChallengeService.ensure_yearly_challenge(chat_id, year)
         if challenge:
