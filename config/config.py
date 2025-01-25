@@ -14,6 +14,8 @@ if not DATABASE_URL:
 
 # Bot
 BOT_TOKEN = os.getenv('BOT_TOKEN')
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN environment variable is not set")
 ADMIN_IDS = os.getenv('ADMIN_IDS', '1431390352').split(',')
 
 # Настройки Stability AI
