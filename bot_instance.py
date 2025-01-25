@@ -1,6 +1,7 @@
 import os
 from telebot import TeleBot
-from config.config import BOT_TOKEN, logger
+from config.config import BOT_TOKEN
+from database.logger import logger
 
 # Создаем экземпляр бота
 logger.info("Creating bot instance")
