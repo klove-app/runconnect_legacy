@@ -5,7 +5,8 @@ from datetime import datetime, timedelta
 from handlers.base_handler import BaseHandler
 from telebot.apihelper import ApiTelegramException
 import traceback
-from database.db import get_connection
+from database.session import Session
+from sqlalchemy import text, func, extract
 
 class ChatGoalHandler(BaseHandler):
     def register(self):
@@ -82,13 +83,41 @@ class ChatGoalHandler(BaseHandler):
             
             # Получаем статистику за прошлый год для сравнения
             last_year = year - 1
-            last_year_stats = RunningLog.get_chat_stats_sqlite(chat_id, last_year)
+            with Session() as session:
+                last_year_stats = session.query(
+                    func.count().label('runs_count'),
+                    func.count(func.distinct(RunningLog.user_id)).label('users_count'),
+                    func.sum(RunningLog.km).label('total_km')
+                ).filter(
+                    RunningLog.chat_id == chat_id,
+                    extract('year', RunningLog.date_added) == last_year
+                ).first()
             
             # Получаем статистику за последний месяц
-            current_month_stats = RunningLog.get_chat_stats_sqlite(chat_id, year, month=datetime.now().month)
+            with Session() as session:
+                current_month_stats = session.query(
+                    func.count().label('runs_count'),
+                    func.count(func.distinct(RunningLog.user_id)).label('users_count'),
+                    func.sum(RunningLog.km).label('total_km')
+                ).filter(
+                    RunningLog.chat_id == chat_id,
+                    extract('year', RunningLog.date_added) == year,
+                    extract('month', RunningLog.date_added) == datetime.now().month
+                ).first()
             
             # Получаем топ-3 участников
-            top_runners = RunningLog.get_top_runners_sqlite(chat_id, year, limit=3)
+            with Session() as session:
+                top_runners = session.query(
+                    RunningLog.user_id,
+                    func.sum(RunningLog.km).label('total_km')
+                ).filter(
+                    RunningLog.chat_id == chat_id,
+                    extract('year', RunningLog.date_added) == year
+                ).group_by(
+                    RunningLog.user_id
+                ).order_by(
+                    func.sum(RunningLog.km).desc()
+                ).limit(3).all()
             
             # Рассчитываем прогноз достижения цели
             days_passed = (datetime.now() - datetime(year, 1, 1)).days
@@ -121,16 +150,16 @@ class ChatGoalHandler(BaseHandler):
             
             # Статистика за текущий месяц
             response += "📅 За текущий месяц:\n"
-            response += f"├ Пройдено: {current_month_stats['total_km']:.2f} км\n"
-            response += f"├ Пробежек: {current_month_stats['runs_count']}\n"
-            response += f"└ Участников: {current_month_stats['users_count']}\n\n"
+            response += f"├ Пройдено: {current_month_stats.total_km or 0:.2f} км\n"
+            response += f"├ Пробежек: {current_month_stats.runs_count or 0}\n"
+            response += f"└ Участников: {current_month_stats.users_count or 0}\n\n"
             
             # Топ-3 участника
             if top_runners:
                 response += "🏆 Топ-3 участника:\n"
                 medals = ["🥇", "🥈", "🥉"]
                 for i, runner in enumerate(top_runners):
-                    response += f"{medals[i]} {runner['user_name']}: {runner['total_km']:.2f} км\n"
+                    response += f"{medals[i]} {runner.user_id}: {runner.total_km:.2f} км\n"
                 response += "\n"
             
             # Средние показатели
@@ -142,25 +171,28 @@ class ChatGoalHandler(BaseHandler):
                 response += f"└ Км в день: {avg_daily:.2f} км\n\n"
             
             # Сравнение с прошлым годом
-            if last_year_stats['total_km'] > 0:
+            if last_year_stats.total_km:
                 # Получаем статистику за прошлый год на текущую дату
                 current_date = datetime.now()
-                last_year_progress = RunningLog.get_chat_stats_until_date_sqlite(
-                    chat_id, 
-                    last_year, 
-                    current_date.month, 
-                    current_date.day
-                )
+                with Session() as session:
+                    last_year_progress = session.query(
+                        func.sum(RunningLog.km).label('total_km')
+                    ).filter(
+                        RunningLog.chat_id == chat_id,
+                        extract('year', RunningLog.date_added) == last_year,
+                        extract('month', RunningLog.date_added) <= current_date.month,
+                        extract('day', RunningLog.date_added) <= current_date.day
+                    ).first()
                 
-                progress_vs_last_year = (total_km / last_year_progress['total_km'] * 100) if last_year_progress['total_km'] > 0 else 0
+                progress_vs_last_year = (total_km / last_year_progress.total_km * 100) if last_year_progress.total_km else 0
                 
                 response += f"📅 Сравнение с {last_year} годом:\n"
-                response += f"├ На эту же дату: {last_year_progress['total_km']:.2f} км\n"
+                response += f"├ На эту же дату: {last_year_progress.total_km or 0:.2f} км\n"
                 
                 # Добавляем информативное сравнение
-                km_diff = total_km - last_year_progress['total_km']
+                km_diff = total_km - (last_year_progress.total_km or 0)
                 if km_diff > 0:
-                    response += f"└ Опережаем на {km_diff:.2f} км (+{progress_vs_last_year - 100:.2f}%) ��\n"
+                    response += f"└ Опережаем на {km_diff:.2f} км (+{progress_vs_last_year - 100:.2f}%) 🚀\n"
                 elif km_diff < 0:
                     response += f"└ Отстаем на {abs(km_diff):.2f} км ({progress_vs_last_year:.2f}%) ⚡️\n"
                 else:
@@ -193,13 +225,21 @@ class ChatGoalHandler(BaseHandler):
             
             # Получаем статистику за прошлый год
             last_year = year - 1
-            last_year_stats = RunningLog.get_chat_stats_sqlite(chat_id, last_year)
+            with Session() as session:
+                last_year_stats = session.query(
+                    func.count().label('runs_count'),
+                    func.count(func.distinct(RunningLog.user_id)).label('users_count'),
+                    func.sum(RunningLog.km).label('total_km')
+                ).filter(
+                    RunningLog.chat_id == chat_id,
+                    extract('year', RunningLog.date_added) == last_year
+                ).first()
             
             markup = InlineKeyboardMarkup()
             
             # Если есть статистика за прошлый год, предлагаем цели на её основе
-            if last_year_stats['total_km'] > 0:
-                last_year_km = last_year_stats['total_km']
+            if last_year_stats.total_km:
+                last_year_km = float(last_year_stats.total_km)
                 markup.row(
                     InlineKeyboardButton(
                         f"🎯 Как в {last_year} году: {last_year_km:.0f} км",
@@ -235,12 +275,12 @@ class ChatGoalHandler(BaseHandler):
             )
             
             response = f"Выберите цель для чата на {year} год:\n\n"
-            if last_year_stats['total_km'] > 0:
+            if last_year_stats.total_km:
                 response += (
                     f"📊 В {last_year} году чат пробежал:\n"
-                    f"├ Всего: {last_year_stats['total_km']:.2f} км\n"
-                    f"├ Пробежек: {last_year_stats['runs_count']}\n"
-                    f"└ Участников: {last_year_stats['users_count']}\n\n"
+                    f"├ Всего: {last_year_stats.total_km:.2f} км\n"
+                    f"├ Пробежек: {last_year_stats.runs_count}\n"
+                    f"└ Участников: {last_year_stats.users_count}\n\n"
                 )
             
             response += "Выберите один из вариантов или настройте точное значение:"
@@ -250,7 +290,7 @@ class ChatGoalHandler(BaseHandler):
         except Exception as e:
             self.logger.error(f"Error in handle_set_chat_goal: {e}")
             self.logger.error(f"Full traceback: {traceback.format_exc()}")
-            self.bot.reply_to(message, "❌ Произошла ошибка при установке цели")
+            self.bot.reply_to(message, "❌ Произошла ошибка при установке цели чата")
 
     def handle_manual_chat_goal(self, message: Message):
         """Обрабатывает ручной ввод цели чата"""

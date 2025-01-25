@@ -4,9 +4,10 @@ from database.models.running_log import RunningLog
 from handlers.base_handler import BaseHandler
 from datetime import datetime, date
 from config.config import ADMIN_IDS
-from database.db import get_connection
+from database.session import Session
 from database.models.user import User
 from database.models.challenge import Challenge
+from sqlalchemy import text
 
 class AdminHandler(BaseHandler):
     def register(self):
@@ -46,17 +47,11 @@ class AdminHandler(BaseHandler):
             start_date = date(2025, 1, 7)
             end_date = date(2025, 1, 8)
             
-            # Сначала получаем список записей
-            conn = get_connection()
-            cursor = conn.cursor()
-            try:
-                cursor.execute(
-                    """SELECT user_id, km, date_added 
-                       FROM running_log 
-                       WHERE date_added BETWEEN ? AND ?""",
-                    (start_date.isoformat(), end_date.isoformat())
-                )
-                records = cursor.fetchall()
+            with Session() as session:
+                # Сначала получаем список записей
+                records = session.query(RunningLog).filter(
+                    RunningLog.date_added.between(start_date, end_date)
+                ).all()
                 
                 if not records:
                     self.bot.reply_to(message, "❌ Записей за 7-8 января 2025 не найдено")
@@ -64,24 +59,25 @@ class AdminHandler(BaseHandler):
                 
                 # Формируем сообщение с найденными записями
                 preview = "Найдены следующие записи для удаления:\n\n"
-                for user_id, km, date_added in records:
-                    preview += f"👤 Пользователь: {user_id}\n"
-                    preview += f"🏃‍♂️ Дистанция: {km} км\n"
-                    preview += f"📅 Дата: {date_added}\n\n"
+                for record in records:
+                    preview += f"👤 Пользователь: {record.user_id}\n"
+                    preview += f"🏃‍♂️ Дистанция: {record.km} км\n"
+                    preview += f"📅 Дата: {record.date_added}\n\n"
                 
                 # Отправляем предварительный просмотр
                 self.bot.reply_to(message, preview)
                 
                 # Удаляем записи
-                deleted_count = RunningLog.delete_entries_by_date_range(start_date, end_date)
+                deleted_count = session.query(RunningLog).filter(
+                    RunningLog.date_added.between(start_date, end_date)
+                ).delete(synchronize_session=False)
+                
+                session.commit()
                 
                 self.bot.reply_to(
                     message,
                     f"✅ Удалено {deleted_count} тестовых записей за период 7-8 января 2025"
                 )
-            finally:
-                cursor.close()
-                conn.close()
             
         except Exception as e:
             self.logger.error(f"Error in handle_delete_test_data: {e}")
