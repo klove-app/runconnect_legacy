@@ -4,13 +4,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Database
-DATABASE_URL = os.getenv('DATABASE_URL')
+DATABASE_URL = os.getenv('DATABASE_PUBLIC_URL', os.getenv('DATABASE_URL'))
 # Убедимся, что используется правильный префикс для PostgreSQL
 if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
     DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
 
 if not DATABASE_URL:
-    raise ValueError("DATABASE_URL environment variable is not set")
+    raise ValueError("Neither DATABASE_PUBLIC_URL nor DATABASE_URL environment variable is set")
 
 # Bot
 BOT_TOKEN = os.getenv('BOT_TOKEN')
