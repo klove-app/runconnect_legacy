@@ -116,10 +116,7 @@ class MessageHandler(BaseHandler):
             total_km = RunningLog.get_user_total_km(str(message.from_user.id))
             
             current_year = datetime.now().year
-            current_month = datetime.now().month
-            
             year_stats = RunningLog.get_user_stats(str(message.from_user.id), current_year)
-            month_stats = RunningLog.get_user_stats(str(message.from_user.id), current_year, current_month)
             
             self.logger.info("=== Preparing response message ===")
             # Формируем сообщение со статистикой
@@ -129,9 +126,9 @@ class MessageHandler(BaseHandler):
                 f"📅 {datetime.now().strftime('%d.%m.%Y')}\n\n"
                 
                 f"📊 Статистика {datetime.now().strftime('%B')}:\n"
-                f"🏃 {month_stats['runs_count']} пробежек\n"
-                f"📏 {month_stats['total_km']:.2f} км всего\n"
-                f"⌀ {month_stats['avg_km']:.2f} км в среднем\n\n"
+                f"🏃 {year_stats['runs_count']} пробежек\n"
+                f"📏 {year_stats['total_km']:.2f} км всего\n"
+                f"⌀ {year_stats['avg_km']:.2f} км в среднем\n\n"
                 
                 f"📈 Статистика {current_year}:\n"
                 f"🏃 {year_stats['runs_count']} пробежек\n"
@@ -291,10 +288,7 @@ class MessageHandler(BaseHandler):
             
             # Получаем статистику за месяц и год
             current_year = datetime.now().year
-            current_month = datetime.now().month
-            
             year_stats = RunningLog.get_user_stats(str(message.from_user.id), current_year)
-            month_stats = RunningLog.get_user_stats(str(message.from_user.id), current_year, current_month)
             
             # Формируем сообщение со статистикой
             response = (
@@ -303,9 +297,9 @@ class MessageHandler(BaseHandler):
                 f"📅 {date}\n\n"
                 
                 f"📊 Статистика {datetime.now().strftime('%B')}:\n"
-                f"🏃 {month_stats['runs_count']} пробежек\n"
-                f"📏 {month_stats['total_km']:.2f} км всего\n"
-                f"⌀ {month_stats['avg_km']:.2f} км в среднем\n\n"
+                f"🏃 {year_stats['runs_count']} пробежек\n"
+                f"📏 {year_stats['total_km']:.2f} км всего\n"
+                f"⌀ {year_stats['avg_km']:.2f} км в среднем\n\n"
                 
                 f"📈 Статистика {current_year}:\n"
                 f"🏃 {year_stats['runs_count']} пробежек\n"

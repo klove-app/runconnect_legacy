@@ -308,7 +308,6 @@ class StatsHandler(BaseHandler):
             # Лучшие показатели
             article += f"\n<b>Лучшие показатели за все время</b>\n"
             article += f"💪 Лучшая пробежка: {best_stats['best_run']:.2f} км\n"
-            article += f"�� Общая дистанция: {best_stats['total_km']:.2f} км\n"
             article += f"📊 Всего пробежек: {best_stats['total_runs']}\n"
             
             return article
@@ -580,37 +579,67 @@ class StatsHandler(BaseHandler):
                 pass
 
     def handle_detailed_stats_callback(self, call):
-        """Обрабатывает нажатие на кнопку расширенной статистики"""
+        """Показывает расширенную статистику пользователя"""
         try:
             user_id = str(call.from_user.id)
-            article = self.handle_detailed_stats(call.message, user_id)
+            current_year = datetime.now().year
+            last_year = current_year - 1
             
-            # Создаем кнопку возврата к профилю
+            # Получаем статистику за текущий и прошлый год
+            year_stats = RunningLog.get_user_stats(user_id, current_year)
+            last_year_stats = RunningLog.get_user_stats(user_id, last_year)
+            
+            # Получаем глобальный ранг пользователя
+            rank_info = RunningLog.get_user_global_rank(user_id)
+            
+            # Получаем лучшие результаты
+            best_stats = RunningLog.get_best_stats(user_id)
+            
+            # Формируем ответ
+            response = f"📊 Подробная статистика\n\n"
+            
+            # Статистика за текущий год
+            response += f"За {current_year} год:\n"
+            response += f"├ Пробежек: {year_stats['runs_count']}\n"
+            response += f"├ Всего: {year_stats['total_km']:.2f} км\n"
+            response += f"└ Средняя: {year_stats['avg_km']:.2f} км\n\n"
+            
+            # Статистика за прошлый год
+            response += f"За {last_year} год:\n"
+            response += f"├ Пробежек: {last_year_stats['runs_count']}\n"
+            response += f"├ Всего: {last_year_stats['total_km']:.2f} км\n"
+            response += f"└ Средняя: {last_year_stats['avg_km']:.2f} км\n\n"
+            
+            # Лучшие результаты
+            response += f"🏆 Лучшие результаты:\n"
+            response += f"├ Одна пробежка: {best_stats['best_run']:.2f} км\n"
+            response += f"└ Всего: {best_stats['total_km']:.2f} км\n\n"
+            
+            # Глобальный рейтинг
+            if rank_info['rank'] > 0:
+                response += f"🌍 Глобальный рейтинг:\n"
+                response += f"└ {rank_info['rank']} из {rank_info['total_users']}\n"
+            
+            # Создаем клавиатуру для возврата
             markup = InlineKeyboardMarkup()
-            markup.row(
-                InlineKeyboardButton(
-                    "◀️ Вернуться к профилю",
-                    callback_data="back_to_profile"
-                )
-            )
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="back_to_profile"))
             
-            # Отправляем статью с расширенной статистикой
+            # Отправляем ответ
             self.bot.edit_message_text(
                 chat_id=call.message.chat.id,
                 message_id=call.message.message_id,
-                text=article,
-                reply_markup=markup,
-                parse_mode='HTML'
+                text=response,
+                reply_markup=markup
             )
             
         except Exception as e:
-            self.logger.error(f"Error in handle_detailed_stats_callback: {e}")
-            self.logger.error(f"Full traceback: {traceback.format_exc()}")
+            logger.error(f"Error in handle_detailed_stats_callback: {e}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             self.bot.answer_callback_query(
                 call.id,
-                "❌ Произошла ошибка при получении расширенной статистики"
+                "❌ Произошла ошибка при получении статистики"
             )
-    
+
     def handle_edit_runs_callback(self, call):
         """Обрабатывает нажатие на кнопку редактирования пробежек"""
         try:
